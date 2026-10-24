@@ -188,6 +188,7 @@ if ($('fix')) $('fix').onclick = () => {
 $('back').onclick = () => {
   if (listening) { listening = false; try { rec.abort(); } catch (e) {} setMic(); }
   $('s2').classList.add('hide'); $('s1').classList.remove('hide'); $('res').classList.add('hide');
+  $('inp').value = ''; $('dict').value = ''; $('heard').textContent = ''; $('inp').focus();
 };
 </script>
 </body>
