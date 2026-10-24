@@ -22,7 +22,9 @@ button.sec{background:transparent;color:var(--ac);border:2px solid var(--ac)}
 #text{font-size:26px;line-height:2}
 .w{padding:1px 5px;border-radius:8px;cursor:pointer}
 .w.ok{background:var(--okb);color:var(--ok)}
-.w.bad{background:var(--badb);color:var(--bad);font-weight:700}
+.w.bad{background:var(--badb);color:var(--bad);font-weight:700;text-decoration:underline wavy;text-underline-offset:5px}
+#s2:not(.hide){display:flex;flex-direction:column}
+#res{order:-1}
 #score{text-align:center}
 #score b{font-size:56px;display:block;line-height:1.1}
 .mu{color:var(--mu);font-size:15px}
@@ -55,10 +57,10 @@ button.sec{background:transparent;color:var(--ac);border:2px solid var(--ac)}
 
   <div id="res" class="card hide">
     <div id="score"></div>
-    <p id="wl" style="text-align:center"></p>
+    <p id="wl" hidden></p>
     <div class="row">
       <button id="again" class="sec">🔁 Đọc lại cả đoạn</button>
-      <button id="fix">🎯 Luyện các từ sai</button>
+      
     </div>
   </div>
   <div class="row"><button id="back" class="sec">✏️ Đổi đoạn văn khác</button></div>
@@ -163,12 +165,10 @@ function evaluate() {
   const sc = Math.round(ok / words.length * 100) / 10;
   const msg = sc >= 9 ? 'Tuyệt vời! 🌟' : sc >= 7 ? 'Khá tốt, cố thêm chút nữa! 👍' : sc >= 5 ? 'Cần luyện thêm các từ đỏ 💪' : 'Đọc chậm và rõ từng từ, thử lại nhé 🙂';
   $('score').innerHTML = '<b>' + sc.toFixed(1) + ' / 10</b>' + msg + '<div class="mu">Đúng ' + ok + '/' + words.length + ' từ</div>';
-  const bad = words.filter((w, i) => !status[i]).map(w => w.raw);
-  $('wl').innerHTML = bad.length ? 'Từ cần luyện lại: <b style="color:var(--bad)">' + [...new Set(bad)].join(', ') + '</b>' : '🎉 Không có từ nào sai!';
-  $('fix').classList.toggle('hide', !bad.length);
+  $('score').innerHTML += (words.length - ok) ? '<p>Các chữ <span class="w bad">màu đỏ</span> trong đoạn văn bên dưới là chữ đọc chưa chuẩn. Bấm vào chữ đỏ để nghe phát âm mẫu.</p>' : '<p>🎉 Không có chữ nào sai!</p>';
   $('res').classList.remove('hide');
   $('heard').textContent = '';
-  $('res').scrollIntoView({ behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 $('go').onclick = () => {
   full = parse($('inp').value);
@@ -180,7 +180,7 @@ $('go').onclick = () => {
 $('mic').onclick = () => listening ? stopRec() : startRec();
 $('grade').onclick = () => { srcText = $('dict').value; errShown = false; evaluate(); srcText = null; };
 $('again').onclick = () => { $('dict').value = ''; words = full; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); startRec(); };
-$('fix').onclick = () => {
+if ($('fix')) $('fix').onclick = () => {
   const seen = new Set(), bad = [];
   words.forEach((w, i) => { if (!status[i] && !seen.has(w.n)) { seen.add(w.n); bad.push(w); } });
   $('dict').value = ''; words = bad; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); startRec();
