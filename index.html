@@ -175,14 +175,15 @@ $('go').onclick = () => {
   if (!full.length) { $('inp').focus(); return; }
   words = full; status = []; render();
   $('s1').classList.add('hide'); $('s2').classList.remove('hide');
+  startRec();
 };
 $('mic').onclick = () => listening ? stopRec() : startRec();
 $('grade').onclick = () => { srcText = $('dict').value; errShown = false; evaluate(); srcText = null; };
-$('again').onclick = () => { $('dict').value = ''; words = full; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); };
+$('again').onclick = () => { $('dict').value = ''; words = full; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); startRec(); };
 $('fix').onclick = () => {
   const seen = new Set(), bad = [];
   words.forEach((w, i) => { if (!status[i] && !seen.has(w.n)) { seen.add(w.n); bad.push(w); } });
-  $('dict').value = ''; words = bad; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0);
+  $('dict').value = ''; words = bad; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); startRec();
 };
 $('back').onclick = () => {
   if (listening) { listening = false; try { rec.abort(); } catch (e) {} setMic(); }
