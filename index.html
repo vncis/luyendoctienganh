@@ -30,6 +30,8 @@ button.sec{background:transparent;color:var(--ac);border:2px solid var(--ac)}
 .mu{color:var(--mu);font-size:15px}
 #heard{min-height:24px;font-size:18px;color:var(--tx)}
 .hide{display:none}
+.w.now{background:#fde047;color:#111;box-shadow:0 0 0 2px #eab308}
+select{font:inherit;padding:10px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--tx);max-width:100%}
 </style>
 </head>
 <body>
@@ -47,6 +49,8 @@ button.sec{background:transparent;color:var(--ac);border:2px solid var(--ac)}
     <div id="text"></div>
     <p class="mu" id="hint">Bấm vào bất kỳ từ nào để nghe phát âm mẫu.</p>
   </div>
+  <button id="play" class="big sec" style="margin-bottom:10px">🔊 Nghe đọc mẫu cả đoạn</button>
+  <div class="row" style="margin:0 0 12px"><select id="voice" aria-label="Giọng đọc"></select><select id="rate" aria-label="Tốc độ"><option value="0.7">Chậm</option><option value="0.85" selected>Vừa</option><option value="1">Bình thường</option></select></div>
   <button id="mic" class="big">🎙️ Bấm để bắt đầu đọc</button>
   <p class="mu" id="heard" style="text-align:center"></p>
   <details class="card" id="alt"><summary><b>📱 Micro không chạy? Đọc bằng bàn phím điện thoại / iPad</b></summary>
@@ -92,6 +96,7 @@ function speak(t) {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(t);
     u.lang = 'en-US'; u.rate = 0.8;
+    const sv = voices[$('voice').value]; if (sv) { u.voice = sv; u.lang = sv.lang; }
     speechSynthesis.speak(u);
   } catch (e) {}
 }
@@ -123,6 +128,7 @@ async function getMic() {
   }
 }
 async function startRec() {
+  stopPlay();
   errShown = false;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { $('heard').textContent = 'Trình duyệt này không hỗ trợ nhận giọng nói. Hãy mở bằng Chrome hoặc Edge.'; return; }
@@ -179,6 +185,50 @@ $('go').onclick = () => {
 };
 $('mic').onclick = () => listening ? stopRec() : startRec();
 $('grade').onclick = () => { srcText = $('dict').value; errShown = false; evaluate(); srcText = null; };
+
+const LANG = 'en';
+let voices = [], playing = false, tmr = null, spansP = [];
+function loadVoices() {
+  try { voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith(LANG)); } catch (e) { voices = []; }
+  const sel = $('voice'); sel.innerHTML = '';
+  voices.forEach((v, i) => { const o = document.createElement('option'); o.value = i; o.textContent = v.name + ' (' + v.lang + ')'; sel.append(o); });
+  const best = voices.findIndex(v => /natural|neural|google|samantha|daniel|karen|serena|anna|petra|markus/i.test(v.name));
+  if (best >= 0) sel.value = best;
+}
+function hl(k) { spansP.forEach((s, i) => s.classList.toggle('now', i === k)); }
+function stopPlay() {
+  try { speechSynthesis.cancel(); } catch (e) {}
+  clearTimeout(tmr); playing = false; hl(-1);
+  $('play').textContent = '🔊 Nghe đọc mẫu cả đoạn';
+}
+function playAll() {
+  if (playing) { stopPlay(); return; }
+  if (listening) return;
+  spansP = [...$('text').querySelectorAll('.w')];
+  let txt = '', offs = [];
+  words.forEach(w => { offs.push(txt.length); txt += w.raw + ' '; });
+  const rate = +$('rate').value;
+  const u = new SpeechSynthesisUtterance(txt);
+  const v = voices[$('voice').value];
+  u.lang = v ? v.lang : (LANG === 'en' ? 'en-US' : 'de-DE'); if (v) u.voice = v; u.rate = rate;
+  let got = false;
+  u.onboundary = e => {
+    if (e.name && e.name !== 'word') return;
+    got = true; clearTimeout(tmr);
+    let k = 0; offs.forEach((o, i) => { if (o <= e.charIndex) k = i; }); hl(k);
+  };
+  u.onend = u.onerror = () => stopPlay();
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+  playing = true; $('play').textContent = '⏹️ Dừng đọc mẫu';
+  setTimeout(() => {
+    if (!playing || got) return;
+    const step = k => { hl(k); if (k + 1 < spansP.length) tmr = setTimeout(() => step(k + 1), (spansP[k].textContent.length * 75 + 150) / rate); };
+    step(0);
+  }, 900);
+}
+$('play').onclick = playAll;
+try { speechSynthesis.onvoiceschanged = loadVoices; } catch (e) {}
+loadVoices();
 $('again').onclick = () => { $('dict').value = ''; words = full; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); startRec(); };
 if ($('fix')) $('fix').onclick = () => {
   const seen = new Set(), bad = [];
