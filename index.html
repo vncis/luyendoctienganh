@@ -32,7 +32,11 @@ button.sec{background:transparent;color:var(--ac);border:2px solid var(--ac)}
 .hide{display:none}
 #dlg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:9}
 #dlg.hide{display:none}
-.sheet{background:var(--card);color:var(--tx);width:100%;max-width:760px;border-radius:20px 20px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px))}
+.sheet{background:var(--card);color:var(--tx);width:100%;max-width:760px;border-radius:20px 20px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));max-height:80vh;overflow-y:auto}
+.dsec{margin:0 0 14px;font-size:17px;line-height:1.5}
+.dmain{font-size:22px;font-weight:700;margin:2px 0}
+.dsec ol{margin:2px 0 6px;padding-left:22px}
+.dpos{margin-top:6px;color:var(--mu)}
 .sheet h2{margin:0 0 4px;font-size:30px}
 a.btn{display:block;text-align:center;text-decoration:none;font-weight:600;border-radius:12px;padding:14px;background:var(--ac);color:#fff;margin-top:10px}
 .w.now{background:#fde047;color:#111;box-shadow:0 0 0 2px #eab308}
@@ -80,9 +84,8 @@ select{font:inherit;padding:10px;border-radius:12px;border:1px solid var(--bd);b
 
 <div id="dlg" class="hide"><div class="sheet" role="dialog" aria-modal="true">
   <h2 id="dw"></h2>
-  <p class="mu">Tra nghĩa của từ trên từ điển Cambridge (mở trong tab mới, cần có mạng).</p>
+  <div class="row" style="justify-content:flex-start;margin:8px 0 12px"><button id="dsay" class="sec">🔊 Nghe lại</button><button id="dx" class="sec">Đóng</button></div>
   <div id="dl"></div>
-  <div class="row"><button id="dsay" class="sec">🔊 Nghe lại</button><button id="dx" class="sec">Đóng</button></div>
 </div></div>
 
 <script>
@@ -115,15 +118,6 @@ function render() {
     s.onclick = () => { speak(w.n); openDict(w.raw.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')); };
     $('text').append(s, ' ');
   });
-}
-function speak(t) {
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(t);
-    u.lang = 'en-US'; u.rate = 0.8;
-    const sv = voices[$('voice').value]; if (sv) { u.voice = sv; u.lang = sv.lang; }
-    speechSynthesis.speak(u);
-  } catch (e) {}
 }
 function align(ref, hyp) {
   const n = ref.length, m = hyp.length, d = [];
@@ -224,58 +218,160 @@ $('mic').onclick = () => listening ? stopRec() : startRec();
 $('grade').onclick = () => { srcText = $('dict').value; errShown = false; evaluate(); srcText = null; };
 
 const LANG = 'en';
-function openDict(n) {
-  const base = 'https://dictionary.cambridge.org/dictionary/';
-  const pairs = LANG === 'de' ? [['german-english', 'Tra Cambridge (Đức–Anh)']] : [['english', 'Tra Cambridge (Anh–Anh)'], ['english-vietnamese', 'Tra Cambridge (Anh–Việt)']];
+const esc = x => String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function getJSON(url) {
+  const c = new AbortController(), t = setTimeout(() => c.abort(), 8000);
+  try {
+    const r = await fetch(url, { signal: c.signal });
+    if (!r.ok) throw new Error('http ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+async function lookVi(n) {
+  try {
+    const j = await getJSON('https://translate.googleapis.com/translate_a/single?client=gtx&sl=' + LANG + '&tl=vi&dt=t&dt=bd&q=' + encodeURIComponent(n));
+    const main = (j[0] || []).map(x => x[0]).join('').trim();
+    const pos = (j[1] || []).slice(0, 4).map(p => ({ pos: p[0], terms: (p[1] || []).slice(0, 5) }));
+    if (main) return { main, pos };
+  } catch (e) {}
+  try {
+    const j = await getJSON('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(n) + '&langpair=' + LANG + '|vi');
+    const main = (j.responseData && j.responseData.translatedText || '').trim();
+    if (main) return { main, pos: [] };
+  } catch (e) {}
+  return null;
+}
+async function lookDef(n) {
+  try {
+    const j = await getJSON('https://api.dictionaryapi.dev/api/v2/entries/' + LANG + '/' + encodeURIComponent(n));
+    if (Array.isArray(j) && j.length) return j[0];
+  } catch (e) {}
+  return null;
+}
+let dictId = 0;
+async function openDict(n) {
+  const id = ++dictId;
   $('dw').textContent = n;
-  $('dl').innerHTML = pairs.map(p => '<a class="btn" target="_blank" rel="noopener" href="' + base + p[0] + '/' + encodeURIComponent(n) + '">' + p[1] + ' ↗</a>').join('');
   $('dsay').onclick = () => speak(n);
+  $('dl').innerHTML = '<p class="mu">Đang tra từ...</p>';
   $('dlg').classList.remove('hide');
+  const [vi, def] = await Promise.all([lookVi(n), lookDef(n)]);
+  if (id !== dictId) return;
+  let h = '';
+  const ph = def && (def.phonetic || (def.phonetics || []).map(p => p.text).find(Boolean));
+  if (ph) $('dw').innerHTML = esc(n) + ' <span class="mu" style="font-size:18px;font-weight:400">' + esc(ph) + '</span>';
+  if (vi) {
+    h += '<div class="dsec"><b>🇻🇳 Nghĩa tiếng Việt</b><div class="dmain">' + esc(vi.main) + '</div>';
+    vi.pos.forEach(p => { h += '<div class="mu"><i>' + esc(p.pos) + '</i>: ' + p.terms.map(esc).join(', ') + '</div>'; });
+    h += '</div>';
+  }
+  if (def && def.meanings && def.meanings.length) {
+    h += '<div class="dsec"><b>📖 Định nghĩa (tiếng Anh)</b>';
+    def.meanings.slice(0, 3).forEach(m => {
+      h += '<div class="dpos"><i>' + esc(m.partOfSpeech || '') + '</i></div><ol>';
+      (m.definitions || []).slice(0, 2).forEach(d => {
+        h += '<li>' + esc(d.definition || '') + (d.example ? '<div class="mu">“' + esc(d.example) + '”</div>' : '') + '</li>';
+      });
+      h += '</ol>';
+    });
+    h += '</div>';
+  }
+  if (!h) h = '<p class="mu">Không tra được từ này. Hãy kiểm tra kết nối mạng hoặc thử từ khác.</p>';
+  const cam = LANG === 'de' ? [['german-english', 'Cambridge Đức–Anh']] : [['english', 'Cambridge Anh–Anh'], ['english-vietnamese', 'Cambridge Anh–Việt']];
+  h += '<p class="mu" style="margin-top:12px">Xem thêm: ' + cam.map(p => '<a target="_blank" rel="noopener" href="https://dictionary.cambridge.org/dictionary/' + p[0] + '/' + encodeURIComponent(n) + '">' + p[1] + ' ↗</a>').join(' · ') + '</p>';
+  $('dl').innerHTML = h;
 }
 $('dx').onclick = () => $('dlg').classList.add('hide');
 $('dlg').onclick = e => { if (e.target === $('dlg')) $('dlg').classList.add('hide'); };
-let voices = [], playing = false, tmr = null, spansP = [];
+let voices = [], playing = false, tmr = null, spansP = [], playId = 0;
 function loadVoices() {
-  try { voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith(LANG)); } catch (e) { voices = []; }
+  try { voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().replace('_', '-').startsWith(LANG)); } catch (e) { voices = []; }
   const sel = $('voice'); sel.innerHTML = '';
   voices.forEach((v, i) => { const o = document.createElement('option'); o.value = i; o.textContent = v.name + ' (' + v.lang + ')'; sel.append(o); });
   const best = voices.findIndex(v => /natural|neural|google|samantha|daniel|karen|serena|anna|petra|markus/i.test(v.name));
   if (best >= 0) sel.value = best;
 }
 function hl(k) { spansP.forEach((s, i) => s.classList.toggle('now', i === k)); }
+function mkUtt(text) {
+  const u = new SpeechSynthesisUtterance(text);
+  const v = voices[$('voice').value];
+  u.lang = v ? v.lang.replace('_', '-') : (LANG === 'en' ? 'en-US' : 'de-DE');
+  if (v) u.voice = v;
+  u.rate = +$('rate').value || 0.85; u.volume = 1;
+  return u;
+}
 function stopPlay() {
+  playId++;
   try { speechSynthesis.cancel(); } catch (e) {}
   clearTimeout(tmr); playing = false; hl(-1);
   $('play').textContent = '🔊 Nghe đọc mẫu cả đoạn';
+}
+function failPlay() {
+  stopPlay();
+  $('heard').textContent = '⚠️ Máy chưa phát được giọng đọc. Trên Android: vào Cài đặt → Hệ thống → Ngôn ngữ → Chuyển văn bản thành giọng nói, chọn "Speech Services by Google" và tải giọng tiếng Anh; kiểm tra âm lượng phương tiện và thử chọn giọng khác. Trên iPhone: tắt chế độ im lặng và tăng âm lượng.';
+}
+function speak(t) {
+  stopPlay();
+  setTimeout(() => {
+    try { speechSynthesis.resume(); speechSynthesis.speak(mkUtt(t)); } catch (e) {}
+  }, 80);
 }
 function playAll() {
   if (playing) { stopPlay(); return; }
   if (listening) return;
   spansP = [...$('text').querySelectorAll('.w')];
-  let txt = '', offs = [];
-  words.forEach(w => { offs.push(txt.length); txt += w.raw + ' '; });
-  const rate = +$('rate').value;
-  const u = new SpeechSynthesisUtterance(txt);
-  const v = voices[$('voice').value];
-  u.lang = v ? v.lang : (LANG === 'en' ? 'en-US' : 'de-DE'); if (v) u.voice = v; u.rate = rate;
-  let got = false;
-  u.onboundary = e => {
-    if (e.name && e.name !== 'word') return;
-    got = true; clearTimeout(tmr);
-    let k = 0; offs.forEach((o, i) => { if (o <= e.charIndex) k = i; }); hl(k);
-  };
-  u.onend = u.onerror = () => stopPlay();
-  speechSynthesis.cancel(); speechSynthesis.speak(u);
+  if (!spansP.length) return;
+  $('heard').textContent = '';
+  const chunks = []; let cur = [];
+  words.forEach((w, i) => {
+    if (cur.length && w.nl) { chunks.push(cur); cur = []; }
+    cur.push(i);
+    if (/[.!?;:]$/.test(w.raw) || cur.length >= 10) { chunks.push(cur); cur = []; }
+  });
+  if (cur.length) chunks.push(cur);
+  const id = ++playId; let ci = 0;
   playing = true; $('play').textContent = '⏹️ Dừng đọc mẫu';
-  setTimeout(() => {
-    if (!playing || got) return;
-    const step = k => { hl(k); if (k + 1 < spansP.length) tmr = setTimeout(() => step(k + 1), (spansP[k].textContent.length * 75 + 150) / rate); };
-    step(0);
-  }, 900);
+  const next = () => {
+    if (id !== playId) return;
+    if (ci >= chunks.length) { stopPlay(); return; }
+    const idxs = chunks[ci++];
+    let txt = ''; const offs = [];
+    idxs.forEach(i => { offs.push(txt.length); txt += words[i].raw + ' '; });
+    const u = mkUtt(txt);
+    let started = false, got = false, tm = null;
+    const est = k => {
+      if (id !== playId) return;
+      hl(idxs[k]);
+      if (k + 1 < idxs.length && !got) tm = setTimeout(() => est(k + 1), (words[idxs[k]].raw.length * 75 + 150) / u.rate);
+    };
+    u.onstart = () => {
+      started = true; hl(idxs[0]);
+      setTimeout(() => { if (!got && id === playId) est(0); }, 700);
+    };
+    u.onboundary = e => {
+      if (id !== playId) return;
+      if (e.name && e.name !== 'word') return;
+      got = true; clearTimeout(tm);
+      let k = 0; offs.forEach((o, j) => { if (o <= e.charIndex) k = j; });
+      hl(idxs[k]);
+    };
+    u.onend = () => { started = true; clearTimeout(tm); next(); };
+    u.onerror = ev => {
+      clearTimeout(tm);
+      if (id !== playId) return;
+      if (ev.error === 'canceled' || ev.error === 'interrupted') return;
+      failPlay();
+    };
+    try { speechSynthesis.resume(); speechSynthesis.speak(u); } catch (e) { failPlay(); return; }
+    setTimeout(() => { if (id === playId && !started) failPlay(); }, 6000);
+  };
+  if (speechSynthesis.speaking || speechSynthesis.pending) { try { speechSynthesis.cancel(); } catch (e) {} setTimeout(next, 100); }
+  else next();
 }
 $('play').onclick = playAll;
 try { speechSynthesis.onvoiceschanged = loadVoices; } catch (e) {}
 loadVoices();
+[500, 1500, 3000].forEach(ms => setTimeout(() => { if (!voices.length) loadVoices(); }, ms));
 $('again').onclick = () => { $('dict').value = ''; words = full; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); };
 if ($('fix')) $('fix').onclick = () => {
   const seen = new Set(), bad = [];
