@@ -79,11 +79,24 @@ const norm = w => w.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9']/
 let full = [], words = [], rec = null, listening = false, finalT = '', interim = '', status = [];
 
 function parse(t) {
-  return t.split(/\s+/).map(r => ({ raw: r, n: norm(r) })).filter(w => w.n);
+  const out = [], re = /(\s*)(\S+)/g;
+  let m, carry = 0;
+  while ((m = re.exec(t.replace(/\r\n?/g, '\n'))) !== null) {
+    const nl = (m[1].match(/\n/g) || []).length + carry;
+    const n = norm(m[2]);
+    if (!n) { carry = nl; continue; }
+    carry = 0;
+    out.push({ raw: m[2], n, nl });
+  }
+  return out;
 }
 function render() {
   $('text').innerHTML = '';
   words.forEach((w, i) => {
+    if (w.nl && i > 0) {
+      $('text').append(document.createElement('br'));
+      if (w.nl > 1) $('text').append(document.createElement('br'));
+    }
     const s = document.createElement('span');
     s.className = 'w' + (status[i] === true ? ' ok' : status[i] === false ? ' bad' : '');
     s.textContent = w.raw;
