@@ -115,7 +115,7 @@ function align(ref, hyp) {
   }
   return res;
 }
-let errShown = false, srcText = null;
+let errShown = false, srcText = null, graded = false, netErr = 0;
 async function getMic() {
   $('heard').textContent = 'Đang xin quyền dùng micro... (hãy bấm "Cho phép" nếu trình duyệt hỏi)';
   try {
@@ -129,11 +129,11 @@ async function getMic() {
 }
 async function startRec() {
   stopPlay();
-  errShown = false;
+  errShown = false; graded = false; netErr = 0;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { $('heard').textContent = 'Trình duyệt này không hỗ trợ nhận giọng nói. Hãy mở bằng Chrome hoặc Edge.'; return; }
   status = []; render(); $('res').classList.add('hide');
-  finalT = ''; interim = ''; $('heard').textContent = 'Đang nghe...';
+  finalT = ''; interim = ''; $('heard').textContent = 'Đang nghe... Cứ đọc đến hết đoạn, đọc xong hãy bấm nút phía trên để chấm điểm.';
   rec = new SR(); rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
   rec.onresult = e => {
     interim = '';
@@ -145,24 +145,37 @@ async function startRec() {
   };
   rec.onerror = e => {
     if (e.error === 'no-speech' || e.error === 'aborted') return;
+    if (e.error === 'network' && ++netErr <= 5) return;
     $('alt').open = true;
     errShown = true; listening = false; setMic();
     const m = { 'not-allowed': 'Chưa có quyền dùng micro.', 'service-not-allowed': 'Trình duyệt chặn nhận giọng nói ở trang này.', 'network': 'Cần có mạng Internet để nhận giọng nói.', 'audio-capture': 'Không tìm thấy micro.' };
     $('heard').textContent = '⚠️ ' + (m[e.error] || 'Lỗi: ' + e.error) + ' Hãy dùng cách đọc bằng bàn phím ở ô bên dưới.';
   };
   rec.onend = () => {
-    if (listening) { try { rec.start(); } catch (e) {} }
-    else evaluate();
+    if (interim) { finalT += interim + ' '; interim = ''; }
+    if (listening) {
+      setTimeout(() => {
+        if (!listening) return;
+        try { rec.start(); } catch (e) {
+          setTimeout(() => { if (listening) { try { rec.start(); } catch (e2) {} } }, 400);
+        }
+      }, 150);
+    } else if (!graded) evaluate();
   };
   listening = true; setMic();
   try { rec.start(); } catch (e) { errShown = true; listening = false; setMic(); $('heard').textContent = '⚠️ Không bật được nhận giọng nói: ' + e.message; }
 }
-function stopRec() { listening = false; setMic(); try { rec.stop(); } catch (e) { evaluate(); } }
+function stopRec() {
+  listening = false; setMic();
+  try { rec.stop(); } catch (e) {}
+  setTimeout(() => { if (!graded) evaluate(); }, 1500);
+}
 function setMic() {
   $('mic').textContent = listening ? '⏹️ Đọc xong — bấm để chấm điểm' : '🎙️ Bấm để bắt đầu đọc';
   $('mic').classList.toggle('rec', listening);
 }
 function evaluate() {
+  graded = true;
   const hyp = (srcText !== null ? srcText : finalT + interim).split(/\s+/).map(norm).filter(Boolean);
   if (!hyp.length) { if (!errShown) $('heard').textContent = 'Chưa nghe thấy gì. Hãy thử lại nhé!'; return; }
   status = align(words.map(w => w.n), hyp);
