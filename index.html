@@ -22,7 +22,11 @@ button.sec{background:transparent;color:var(--ac);border:2px solid var(--ac)}
 #text{font-size:26px;line-height:2}
 .w{padding:1px 5px;border-radius:8px;cursor:pointer}
 .w.ok{background:var(--okb);color:var(--ok)}
-.w.bad{background:var(--badb);color:var(--bad);font-weight:700;text-decoration:underline wavy;text-underline-offset:5px}
+.w.bad,.w.mix{background:var(--okb);color:var(--ok)}
+.w.bad{background:var(--badb);color:var(--bad);font-weight:700}
+.cg{color:var(--ok);font-weight:700}
+.cr{background:var(--badb);color:var(--bad);font-weight:700;text-decoration:underline wavy;text-underline-offset:5px;border-radius:4px}
+#dh{margin:0 0 12px;font-size:17px}
 #s2:not(.hide){display:flex;flex-direction:column}
 #res{order:-1}
 #score{text-align:center}
@@ -85,13 +89,14 @@ select{font:inherit;padding:10px;border-radius:12px;border:1px solid var(--bd);b
 <div id="dlg" class="hide"><div class="sheet" role="dialog" aria-modal="true">
   <h2 id="dw"></h2>
   <div class="row" style="justify-content:flex-start;margin:8px 0 12px"><button id="dsay" class="sec">🔊 Nghe lại</button><button id="dx" class="sec">Đóng</button></div>
+  <div id="dh"></div>
   <div id="dl"></div>
 </div></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const norm = w => w.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9']/g, '');
-let full = [], words = [], rec = null, listening = false, finalT = '', interim = '', status = [];
+let full = [], words = [], rec = null, listening = false, finalT = '', interim = '', status = [], hw = [];
 
 function parse(t) {
   const out = [], re = /(\s*)(\S+)/g;
@@ -105,6 +110,31 @@ function parse(t) {
   }
   return out;
 }
+function letterSegs(raw, heard) {
+  const m = raw.match(/^([^\p{L}\p{N}]*)([\s\S]*?)([^\p{L}\p{N}]*)$/u);
+  const lead = m[1], core = [...m[2]], trail = m[3];
+  const key = c => c.toLowerCase().replace('ß', 's');
+  const hy = [...String(heard).replace(/ß/g, 'ss')];
+  const n = core.length, k = hy.length, L = [];
+  for (let i = 0; i <= n; i++) L.push(new Array(k + 1).fill(0));
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= k; j++)
+    L[i][j] = key(core[i-1]) === hy[j-1] ? L[i-1][j-1] + 1 : Math.max(L[i-1][j], L[i][j-1]);
+  const ok = new Array(n).fill(false);
+  let i = n, j = k;
+  while (i > 0 && j > 0) {
+    if (key(core[i-1]) === hy[j-1]) { ok[i-1] = true; i--; j--; }
+    else if (L[i-1][j] >= L[i][j-1]) i--; else j--;
+  }
+  if (n >= 4) for (let x = 1; x < n - 1; x++) if (ok[x] && !ok[x-1] && !ok[x+1]) ok[x] = false;
+  const segs = [];
+  if (lead) segs.push({ t: lead, ok: null });
+  core.forEach((c, x) => {
+    const last = segs[segs.length - 1];
+    if (last && last.ok === ok[x]) last.t += c; else segs.push({ t: c, ok: ok[x] });
+  });
+  if (trail) segs.push({ t: trail, ok: null });
+  return segs;
+}
 function render() {
   $('text').innerHTML = '';
   words.forEach((w, i) => {
@@ -113,9 +143,20 @@ function render() {
       if (w.nl > 1) $('text').append(document.createElement('br'));
     }
     const s = document.createElement('span');
-    s.className = 'w' + (status[i] === true ? ' ok' : status[i] === false ? ' bad' : '');
-    s.textContent = w.raw;
-    s.onclick = () => { speak(w.n); openDict(w.raw.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')); };
+    const bad = status[i] === false;
+    s.className = 'w' + (status[i] === true ? ' ok' : bad ? (typeof hw[i] === 'string' ? ' mix' : ' bad') : '');
+    if (bad && typeof hw[i] === 'string') {
+      letterSegs(w.raw, hw[i]).forEach(g => {
+        const e = document.createElement('span');
+        if (g.ok === true) e.className = 'cg'; else if (g.ok === false) e.className = 'cr';
+        e.textContent = g.t; s.append(e);
+      });
+    } else s.textContent = w.raw;
+    s.onclick = () => {
+      speak(w.n);
+      const clean = w.raw.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+      openDict(clean, bad ? (typeof hw[i] === 'string' ? hw[i] : null) : undefined);
+    };
     $('text').append(s, ' ');
   });
 }
@@ -125,14 +166,14 @@ function align(ref, hyp) {
   for (let j = 0; j <= m; j++) d[0][j] = j;
   for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++)
     d[i][j] = Math.min(d[i-1][j-1] + (ref[i-1] === hyp[j-1] ? 0 : 1), d[i-1][j] + 1, d[i][j-1] + 1);
-  const res = new Array(n).fill(false);
+  const res = new Array(n).fill(false), hw = new Array(n).fill(null);
   let i = n, j = m;
   while (i > 0) {
-    if (j > 0 && d[i][j] === d[i-1][j-1] + (ref[i-1] === hyp[j-1] ? 0 : 1)) { res[i-1] = ref[i-1] === hyp[j-1]; i--; j--; }
-    else if (d[i][j] === d[i-1][j] + 1) { res[i-1] = false; i--; }
+    if (j > 0 && d[i][j] === d[i-1][j-1] + (ref[i-1] === hyp[j-1] ? 0 : 1)) { res[i-1] = ref[i-1] === hyp[j-1]; hw[i-1] = hyp[j-1]; i--; j--; }
+    else if (d[i][j] === d[i-1][j] + 1) { res[i-1] = false; hw[i-1] = null; i--; }
     else j--;
   }
-  return res;
+  return { res, hw };
 }
 let errShown = false, srcText = null, graded = false, netErr = 0;
 async function getMic() {
@@ -151,7 +192,7 @@ async function startRec() {
   errShown = false; graded = false; netErr = 0;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { $('heard').textContent = 'Trình duyệt này không hỗ trợ nhận giọng nói. Hãy mở bằng Chrome hoặc Edge.'; return; }
-  status = []; render(); $('res').classList.add('hide');
+  status = []; hw = []; render(); $('res').classList.add('hide');
   finalT = ''; interim = ''; $('heard').textContent = 'Đang nghe... Cứ đọc đến hết đoạn, đọc xong hãy bấm nút phía trên để chấm điểm.';
   rec = new SR(); rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
   rec.onresult = e => {
@@ -197,13 +238,14 @@ function evaluate() {
   graded = true;
   const hyp = (srcText !== null ? srcText : finalT + interim).split(/\s+/).map(norm).filter(Boolean);
   if (!hyp.length) { if (!errShown) $('heard').textContent = 'Chưa nghe thấy gì. Hãy thử lại nhé!'; return; }
-  status = align(words.map(w => w.n), hyp);
+  const al = align(words.map(w => w.n), hyp);
+  status = al.res; hw = al.hw;
   render();
   const ok = status.filter(Boolean).length;
   const sc = Math.round(ok / words.length * 100) / 10;
-  const msg = sc >= 9 ? 'Tuyệt vời! 🌟' : sc >= 7 ? 'Khá tốt, cố thêm chút nữa! 👍' : sc >= 5 ? 'Cần luyện thêm các từ đỏ 💪' : 'Đọc chậm và rõ từng từ, thử lại nhé 🙂';
+  const msg = sc >= 9 ? 'Tuyệt vời! 🌟' : sc >= 7 ? 'Khá tốt, cố thêm chút nữa! 👍' : sc >= 5 ? 'Cần luyện thêm các phần chữ đỏ 💪' : 'Đọc chậm và rõ từng từ, thử lại nhé 🙂';
   $('score').innerHTML = '<b>' + sc.toFixed(1) + ' / 10</b>' + msg + '<div class="mu">Đúng ' + ok + '/' + words.length + ' từ</div>';
-  $('score').innerHTML += (words.length - ok) ? '<p>Các chữ <span class="w bad">màu đỏ</span> trong đoạn văn bên dưới là chữ đọc chưa chuẩn. Bấm vào chữ đỏ để nghe phát âm mẫu.</p>' : '<p>🎉 Không có chữ nào sai!</p>';
+  $('score').innerHTML += (words.length - ok) ? '<p>Trong mỗi từ, phần <span class="cg">màu xanh</span> là phần đọc đúng, phần <span class="cr">màu đỏ</span> là phần máy nghe chưa đúng. Bấm vào từ để nghe mẫu và xem máy đã nghe thấy gì.</p>' : '<p>🎉 Không có chữ nào sai!</p>';
   $('res').classList.remove('hide');
   $('heard').textContent = '';
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -211,7 +253,7 @@ function evaluate() {
 $('go').onclick = () => {
   full = parse($('inp').value);
   if (!full.length) { $('inp').focus(); return; }
-  words = full; status = []; render();
+  words = full; status = []; hw = []; render();
   $('s1').classList.add('hide'); $('s2').classList.remove('hide');
 };
 $('mic').onclick = () => listening ? stopRec() : startRec();
@@ -249,9 +291,10 @@ async function lookDef(n) {
   return null;
 }
 let dictId = 0;
-async function openDict(n) {
+async function openDict(n, info) {
   const id = ++dictId;
   $('dw').textContent = n;
+  $('dh').innerHTML = info === undefined ? '' : info === null ? '🎤 Máy không nghe thấy từ này khi bạn đọc.' : '🎤 Máy nghe bạn đọc thành: <b style="color:var(--bad)">' + esc(info) + '</b>';
   $('dsay').onclick = () => speak(n);
   $('dl').innerHTML = '<p class="mu">Đang tra từ...</p>';
   $('dlg').classList.remove('hide');
@@ -372,11 +415,11 @@ $('play').onclick = playAll;
 try { speechSynthesis.onvoiceschanged = loadVoices; } catch (e) {}
 loadVoices();
 [500, 1500, 3000].forEach(ms => setTimeout(() => { if (!voices.length) loadVoices(); }, ms));
-$('again').onclick = () => { $('dict').value = ''; words = full; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); };
+$('again').onclick = () => { $('dict').value = ''; words = full; status = []; hw = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0); };
 if ($('fix')) $('fix').onclick = () => {
   const seen = new Set(), bad = [];
   words.forEach((w, i) => { if (!status[i] && !seen.has(w.n)) { seen.add(w.n); bad.push(w); } });
-  $('dict').value = ''; words = bad; status = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0);
+  $('dict').value = ''; words = bad; status = []; hw = []; render(); $('res').classList.add('hide'); window.scrollTo(0, 0);
 };
 $('back').onclick = () => {
   if (listening) { listening = false; try { rec.abort(); } catch (e) {} setMic(); }
